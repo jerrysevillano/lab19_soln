@@ -27,7 +27,9 @@ let cRENDER_FREQUENCY = 1     (* how frequently grid is rendered (in ticks) *) ;
 (*......................................................................
   Game of Life states, updates, and utility functions
  *)
-  
+
+(* We take the opportunity to abstract the cell states as an
+   enumerated type *)
 type life_state =
   | Live
   | Dead ;;
