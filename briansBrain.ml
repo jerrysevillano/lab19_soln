@@ -1,9 +1,6 @@
 (*
                              CS 51 Lab 19
-               Conway's Game of Life Cellular Automaton
- *)
-(* 
-                               SOLUTION
+                   Brian's Brain Cellular Automaton
  *)
 
 module G = Graphics ;;
@@ -11,41 +8,37 @@ module G = Graphics ;;
 (* Automaton parameters *)
 let cGRID_SIZE = 100 ;;       (* width and height of grid in cells *)
 let cSPARSITY = 5 ;;          (* inverse of proportion of cells initially live *)
-let cRANDOMNESS = 0.00001 ;;  (* probability of randomly modifying a cell *)
 
 (* Rendering parameters *)
-let cCOLOR_LIVE = G.rgb 93 46 70 ;;       (* color to depict live cells *)
-let cCOLOR_DEAD = G.rgb 242 227 211 ;;    (* background color *)
+let cCOLOR_LIVE = G.rgb 200 200 200 ;;       (* color to depict live cells *)
+let cCOLOR_DYING = G.rgb 130 0 0 ;;   (* color to depict dying cells *)
+let cCOLOR_DEAD = G.rgb 0 0 0 ;;          (* background color *)
 let cCOLOR_LEGEND = G.rgb 173 106 108 ;;  (* color for textual legend *)
 let cSIDE = 8 ;;              (* width and height of cells in pixels *)
 let cRENDER_FREQUENCY = 1     (* how frequently grid is rendered (in ticks) *) ;;
-
-(* Font specification for rendering the legend. OCaml font handling is
-   platform dependent, so we leave this as `None`, but we provide the
-   functionality for use in the solution set. Feel free to play with
-   this or leave it as is. *)
 let cFONT = Some "-adobe-times-bold-r-normal--34-240-100-100-p-177-iso8859-9"
-
-    
+              
 (*----------------------------------------------------------------------
-  The Game of Life 
+  Brian's Brain Cellular Automaton 
  *)
 
 (*......................................................................
-  Game of Life states and updates
+  States, updates, and utility functions
  *)
 
 (* We take the opportunity to abstract the cell states as an
    enumerated type *)
-type life_state =
+type bbrain_state =
   | Live
+  | Dying
   | Dead ;;
  
 (* flipped state -- Returns the opposite state to `state`. *)
-let flipped (state : life_state) : life_state =
+let flipped (state : bbrain_state) : bbrain_state =
   match state with
-  | Live -> Dead
-  | Dead -> Live ;;
+  | Live -> Live
+  | Dying -> Dying
+  | Dead -> Dead ;;
       
 (* offset index off -- Returns the `index` offset by `off` allowing
    for wraparound. *)
@@ -55,36 +48,12 @@ let rec offset (index : int) (off : int) : int =
   else
     (index + off) mod cGRID_SIZE ;;
 
-(* life_update grid i j -- Returns the updated value for cell at `i,
-   j` in the grid based on rules of Conway's Game of Life. In this
-   implementation, after updating as per the standard GoL update rule,
-   a cell's state is then flipped with probability given by
-   cRANDOMNESS. *)
-let life_update (grid : life_state array array) (i : int) (j : int) : life_state =
-
-  (* We give a few variant update rules for the Game of Life. These
-     lists are indexed by adjacency count to give the generated cell
-     status.
-                       0     1     2     3     4     5     6     7     8  
-                       |     |     |     |     |     |     |     |     |
-                       v     v     v     v     v     v     v     v     v   *)
-  (* B3/S23: Conway's original game of life *)
-  let dead_update = [Dead; Dead; Dead; Live; Dead; Dead; Dead; Dead; Dead] in
-  let live_update = [Dead; Dead; Live; Live; Dead; Dead; Dead; Dead; Dead] in
-
-  (* B3/S12345: https://conwaylife.com/wiki/OCA:Maze
-     let dead_update = [Dead; Dead; Dead; Live; Dead; Dead; Dead; Dead; Dead] in
-     let live_update = [Dead; Live; Live; Live; Live; Live; Dead; Dead; Dead] in
-   *)
-  (* B36/S125: https://conwaylife.com/wiki/OCA:2×2
-     let dead_update = [Dead; Dead; Dead; Live; Dead; Dead; Live; Dead; Dead] in
-     let live_update = [Dead; Live; Live; Dead; Dead; Live; Dead; Dead; Dead] in
-   *)
-  (* B3678/34678: https://conwaylife.com/wiki/OCA:Day_%26_Night
-     let dead_update = [Dead; Dead; Dead; Live; Dead; Dead; Live; Live; Live] in
-     let live_update = [Dead; Dead; Dead; Live; Live; Dead; Live; Live; Live] in
-   *)
-  
+(* bbrain_update grid i j -- Returns the updated value for cell at `i,
+   j` in the grid based on rules of Brian's Brain
+   <https://en.wikipedia.org/wiki/Brian%27s_Brain>. *)
+let bbrain_update (grid : bbrain_state array array)
+                  (i : int) (j : int)
+    : bbrain_state =
   let neighbors = ref 0 in
   for i' = ~-1 to ~+1 do
     for j' = ~-1 to ~+1 do
@@ -93,54 +62,53 @@ let life_update (grid : life_state array array) (i : int) (j : int) : life_state
       neighbors := !neighbors
                    + match grid.(i_ind).(j_ind) with
                      | Live -> 1
+                     | Dying -> 0
                      | Dead -> 0
     done
   done;
   (* determine new state based on neighbor count *)
   let new_state =
     match grid.(i).(j) with
-    | Live -> List.nth live_update (!neighbors - 1)
-    | Dead -> List.nth dead_update !neighbors in
-  (* randomly flip an occasional cell state *)
-  if Random.float 1.0 <= cRANDOMNESS then
-    flipped new_state
-  else
-    new_state ;;
+    | Live -> Dying
+    | Dying -> Dead
+    | Dead -> if !neighbors = 2 then Live else Dead in
+  new_state ;;
   
 (*......................................................................
-  Making the Game of Life
+  Making Brian's Brain
  *)
 
-(* GoL automaton specification *)
+(* Automaton specification *)
   
-module LifeSpec : (Cellular.AUT_SPEC
-                   with type state = life_state) =
+module BBrainSpec : (Cellular.AUT_SPEC
+                     with type state = bbrain_state) =
   struct 
-    type state = life_state
+    type state = bbrain_state
     let initial : state = Dead
     let grid_size : int = cGRID_SIZE
-    let update = life_update
-    let name : string = "Conway's Life"
+    let update = bbrain_update
+    let name : string = "Brain's Brain"
     let cell_color (cell : state) : G.color =
       match cell with
       | Live -> cCOLOR_LIVE
+      | Dying -> cCOLOR_DYING
       | Dead -> cCOLOR_DEAD
     let side_size : int = cSIDE
     let legend_color : G.color = cCOLOR_LEGEND
-    let font : string option = cFONT
+    let font : string = cFONT
     let render_frequency : int = cRENDER_FREQUENCY
   end ;;
 
 (* GoL automaton *)
   
-module Aut = Cellular.Automaton (LifeSpec) ;;
+module Aut = Cellular.Automaton (BBrainSpec) ;;
 
-(* Some initial grids *)
+(* Initial grids *)
 
 (* random_grid count -- Returns a grid with cells set to live at
    `count` random locations. *)
 let random_grid count =
-  let the_grid = Aut.current_grid in
+  let the_grid = Aut.fresh_grid() in
   for _ = 1 to count do
     the_grid.(Random.int cGRID_SIZE).(Random.int cGRID_SIZE) <- Live
   done;
@@ -156,7 +124,7 @@ let main seed =
   
   Random.init seed;      (* initialize randomness *)
   Aut.graphics_init ();  (* ... and graphics window *)
-
+  (* Run the automaton starting with a random grid *)
   let initial_grid =
     random_grid (cGRID_SIZE * cGRID_SIZE / cSPARSITY) in
   Aut.run_grid initial_grid ;;
@@ -169,3 +137,4 @@ let _ =
   else
     main (int_of_string Sys.argv.(1)) ;;
   
+

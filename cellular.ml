@@ -8,14 +8,12 @@
 
 module G = Graphics ;;
 
-let cFONT = "-adobe-times-bold-r-normal--34-240-100-100-p-177-iso8859-9" ;;
-
 (***********************************************************************
     Do not change either of the two module type signatures in this
     file. Doing so will likely cause your code to not to compile
     against our unit tests. 
 ***********************************************************************)
-     
+
 (*......................................................................
   Specifying automata 
 
@@ -44,6 +42,7 @@ module type AUT_SPEC =
     val cell_color : state -> G.color
                                (* color for each state *)
     val legend_color : G.color (* color to render legend *)
+    val font : string option   (* optional font for legend as per Graphics module *)
     val render_frequency : int (* how frequently grid is rendered (in ticks) *)
   end ;;
 
@@ -53,40 +52,67 @@ module type AUT_SPEC =
   Implementations of cellular automata provides for the following
   functionality:
 
-  * Creating a grid, which can then be updated by the receiver to form
-    the initial grid of a trial.
+  * A current (mutable) grid that can be modified (`replace_grid`).
 
-  * Initializing the graphics window in preparation for rendering.
+  * Creating additional fresh grids (`fresh_grid`).
 
-  * Mapping an update function simultaneously over all cells of a grid.
+  * Initializing the graphics window in preparation for rendering
+    (`graphics_init`).
+
+  * Mapping the automaton's update function simultaneously over all
+    cells of the current grid (`update_grid`).
 
   * Running the automaton using a particular update function, and
-    rendering it as it evolves. 
+    rendering it as it evolves (`run_grid`). 
 
-as codified in the `AUTOMATON` signature. *)
+  as codified in the `AUTOMATON` signature. 
+
+  Note the difference between the argument structure of functions in
+  `life.ml`, where the grid is passed in as argument to several
+  functions, as compared to the approach here, where there is a single
+  mutable current grid that is updated by the functions, so that no
+  grid argument is required.
+ *)
   
 module type AUTOMATON =
   sig
     (* state -- Possible states that a grid cell can be in *)
     type state
+
     (* grid -- 2D grid of cell states *)
     type grid = state array array
-    (* create_grid () -- Returns a grid with all cells in initial
-       states. *)
-    val create_grid : unit -> grid
+                                           
+    (* current_grid -- The current grid of the appropriate size as per
+       the spec, which is initialized with all cells being in the
+       initial state. It can be modified directly or by `replace_grid`
+       or updated with the automaton's update rule. *)
+    val current_grid : grid
+
+    (* fresh_grid () -- Returns a fresh grid of the appropriate size
+       as per the spec, initialized with all cells being in the
+       initial state. *)
+    val fresh_grid : unit -> grid
+
+    (* replace_grid new_grid -- Destructively changes the current grid
+       to `new_grid`. *)
+    val replace_grid : grid -> unit
+
     (* graphics_init () -- Initialize the graphics window to the
        correct size and other parameters. Auto-synchronizing is off,
        so our code is responsible for flushing to the screen upon
        rendering. *)
     val graphics_init : unit -> unit
-    (* step_grid grid -- Updates the `grid` by updating each cell
-       simultaneously as per the CA's update rule. *)
-    val step_grid : grid -> unit
-    (* run_grid grid update -- Starts up the automaton on the provided
-       initial `grid` using the `update` rule, rendering to the
-       graphics window until a key is pressed. The `update` rule is a
-       function operating as per `map_grid`. Assumes graphics has been
-       initialized. *)
+
+    (* update_grid () -- Updates the current grid one "tick" by
+       updating each cell simultaneously as per the CA's update
+       rule. *)
+    val update_grid : unit -> unit
+
+    (* run_grid grid -- Initializes the current grid with `grid` and
+       repeatedly updates it using the automaton's update rule rule,
+       rendering the grid state to the graphics window until a key is
+       pressed. Assumes graphics has been initialized with
+       `graphics_init`. *)
     val run_grid : grid -> unit
   end ;;
 
@@ -103,18 +129,15 @@ module Automaton (Spec : AUT_SPEC)
     type state = Spec.state
     type grid = Spec.state array array
 
-    (* create_grid -- See module type documentation *)
-    let create_grid () : grid =
+    (* fresh_grid () -- See module type documentation *)
+    let fresh_grid (() : unit) : grid =
       Array.make_matrix Spec.grid_size Spec.grid_size Spec.initial
-
-    (* graphics_init -- See module type documentation *)
-    let graphics_init () : unit =
-      G.open_graph ""; 
-      G.resize_window (Spec.grid_size * Spec.side_size)
-                      (Spec.grid_size * Spec.side_size);
-      G.set_font cFONT;
-      G.auto_synchronize false
-
+                        
+    (* current -- The current grid, which is destructively updated
+       after each tick; initialized with the initial state. *)
+    let current_grid =
+      fresh_grid ()
+                 
     (* copy_grid src dst -- Destructively updates `dst` grid to have
        contents of `src` grid *)
     let copy_grid (src : grid) (dst : grid) : unit =
@@ -124,21 +147,35 @@ module Automaton (Spec : AUT_SPEC)
         done
       done
         
-    (* step_grid grid fn -- See module type definition. *)
-    let step_grid =
-      let temp_grid = create_grid () in
-      fun (grid : state array array) ->
-        for i = 0 to Spec.grid_size - 1 do
-          for j = 0 to Spec.grid_size - 1 do
-            temp_grid.(i).(j) <- Spec.update grid i j
-          done 
-        done;
-      copy_grid temp_grid grid
+    (* replace_grid -- See module type documentation *)
+    let replace_grid (grid : grid) : unit =
+      copy_grid grid current_grid
+                
+    (* graphics_init -- See module type documentation *)
+    let graphics_init () : unit =
+      G.open_graph ""; 
+      G.resize_window (Spec.grid_size * Spec.side_size)
+                      (Spec.grid_size * Spec.side_size);
+      (match Spec.font with
+       | None -> ()
+       | Some fontspec -> G.set_font fontspec);
+      G.auto_synchronize false
+        
+    (* update_grid -- See module type definition. *)
+    let update_grid =
+      (* use a single static temp grid across invocations *)
+      let temp_grid = fresh_grid () in
+      fun () -> for i = 0 to Spec.grid_size - 1 do
+                  for j = 0 to Spec.grid_size - 1 do
+                    temp_grid.(i).(j) <- Spec.update current_grid i j
+                  done 
+                done;
+                copy_grid temp_grid current_grid
 
     (* render_grid grid legend -- Renders the `grid` to the already
        initalized graphics window including the textual `legend` *)
-    let render_grid (grid : state array array) (legend : string) : unit =
-      (* Draw the grid of cells *)
+    let render_grid (grid : grid) (legend : string) : unit =
+      (* draw the grid of cells *)
       for i = 0 to Spec.grid_size - 1 do
         for j = 0 to Spec.grid_size - 1 do
           G.set_color (Spec.cell_color grid.(i).(j));
@@ -146,23 +183,28 @@ module Automaton (Spec : AUT_SPEC)
                       (Spec.side_size - 1) (Spec.side_size - 1)
         done
       done;
-      (* Draw the legend *)
+      (* draw the legend *)
       G.moveto (Spec.side_size * 2) (Spec.side_size * 2);
       G.set_color Spec.legend_color;
       G.draw_string legend;
-      (* Flush to the screen *)
+      (* flush to the screen *)
       G.synchronize ()
 
     (* run_grid -- See module type documentation *)
-    let run_grid grid =
+    let run_grid (initial_grid : grid) : unit =
+      replace_grid initial_grid;
       let tick = ref 0 in
-      render_grid grid (Printf.sprintf "%s: tick %d" Spec.name !tick);
+      render_grid current_grid (Printf.sprintf "%s: tick %d" Spec.name !tick);
       ignore (G.read_key ());    (* pause at start until key is pressed *)
       while not (G.key_pressed ()) do
         if !tick mod Spec.render_frequency = 0 then
-          render_grid grid (Printf.sprintf "%s: tick %d" Spec.name !tick);
-        step_grid grid;
-        tick := succ !tick;
+          begin
+            update_grid ();
+            tick := succ !tick;
+            render_grid current_grid (Printf.sprintf "%s: tick %d" Spec.name !tick)
+          end
       done;
+      ignore (G.read_key ());    (* clear the keypress *)
+      ignore (G.read_key ());    (* await another keypress *)
       G.close_graph () ;;
   end ;;
